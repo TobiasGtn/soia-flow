@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transcritor Desktop v1.2 — ditado por voz com Whisper na nuvem (Groq).
+"""SOIA Flow — ditado por voz com Whisper na nuvem (Groq).
 
 Uma barrinha preta discreta fica no centro-inferior da tela, logo acima da
 barra de tarefas. Ao passar o mouse, ela expande mostrando o microfone e o
@@ -45,7 +45,7 @@ if not any(isinstance(h, logging.FileHandler) for h in _root_log.handlers):
 _root_log.setLevel(logging.INFO)
 log = logging.getLogger("app")
 
-log.info("=== Transcritor Desktop v1.2 — iniciando ===")
+log.info("=== SOIA Flow v2.0 — iniciando ===")
 
 # ── Imports ────────────────────────────────────────────────────────────────────
 import ctypes
@@ -121,7 +121,7 @@ def _save_config(cfg: dict):
 TAXA        = 16000            # Hz — o que o Whisper espera
 GROQ_URL    = "https://api.groq.com/openai/v1"
 MAX_SEG     = 900              # auto-para após 15 min de gravação
-VERSAO      = "v 1.6"
+VERSAO      = "v 2.0"
 
 # Design — balões pretos com borda cinza sutil (estilo Wispr).
 # TRANSPARENT é a cor-chave da janela: os balões são renderizados em PIL com
@@ -132,16 +132,26 @@ PANEL_FILL  = "#101010"        # fundo dos balões
 BORDER      = "#5c5c5c"        # borda dos balões
 PILL_BORDER = "#8c8c8c"        # borda da barrinha (um pouco mais visível)
 DOT_RED     = "#e53935"
-GREEN       = "#43a047"
 WHITE       = "#ffffff"
 MUTED       = "#8a8a8a"
-ACCENT      = "#1e88e5"
-ACCENT_HOV  = "#1976d2"
-# Tela de configurações
-SET_BG      = "#1e1e1e"
-FIELD_BG    = "#2f2f2f"
-FIELD_HOV   = "#3d3d3d"
-SEP         = "#333333"
+
+# Paleta SOIA CRC (de dev/soia-nova-interface/src/index.css)
+TINTA       = "#0e0f11"        # texto principal
+TINTA_3     = "#6b717a"        # texto secundário
+VERDE       = "#0e7a5f"        # o único acento: verde-esmeralda profundo
+VERDE_ESC   = "#0a5c47"
+VERDE_VIVO  = "#13a87b"
+VERDE_SUAVE = "#e9f4f0"
+VERMELHO    = "#dc2626"
+FIO         = "#e5e7eb"
+GREEN       = VERDE_VIVO       # sinalizações positivas nos balões escuros
+ACCENT      = VERDE
+ACCENT_HOV  = VERDE_ESC
+# Tela de configurações — superfícies claras do SOIA
+SET_BG      = "#ffffff"
+FIELD_BG    = "#f4f4f5"
+FIELD_HOV   = "#e9eaec"
+SEP         = FIO
 
 SPINNER     = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
 ICO_MIC     = "\uE720"         # microfone — fonte Segoe MDL2 Assets (Win10/11)
@@ -194,15 +204,32 @@ def pretty_hotkey(combo: str) -> str:
     return " + ".join(p.strip().capitalize() for p in combo.split("+") if p.strip())
 
 
-def _make_tray_image() -> Image.Image:
-    """Microfone branco, estilo dos ícones monocromáticos do Windows 11."""
-    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+def _logo_soia(size: int = 64) -> Image.Image:
+    """Logo do SOIA CRC: funil branco sobre o tile verde vitrificado
+    (mesmo desenho do favicon.svg do soia-nova-interface)."""
+    k = 4
+    s = size * k
+    # Tile com degradê vertical #149a6f → #0c6b50
+    grad = Image.new("RGBA", (s, s))
+    gd = ImageDraw.Draw(grad)
+    topo, base = (20, 154, 111), (12, 107, 80)
+    for y in range(s):
+        t = y / (s - 1)
+        cor = tuple(int(topo[i] + (base[i] - topo[i]) * t) for i in range(3))
+        gd.line([(0, y), (s, y)], fill=cor + (255,))
+    mask = Image.new("L", (s, s), 0)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, s - 1, s - 1], radius=int(s * 7 / 32), fill=255)
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    img.paste(grad, (0, 0), mask)
+    # Funil: três barras brancas decrescentes
     d = ImageDraw.Draw(img)
-    d.rounded_rectangle([24, 8, 40, 36], radius=8, fill="white")
-    d.arc([16, 18, 48, 46], start=0, end=180, fill="white", width=4)
-    d.line([32, 46, 32, 53], fill="white", width=4)
-    d.line([22, 55, 42, 55], fill="white", width=4)
-    return img
+    e = s / 32
+    for wbar, y in ((24.0, 8.0), (15.6, 14.4), (7.6, 20.8)):
+        x0 = (32 - wbar) / 2 * e
+        d.rounded_rectangle([x0, y * e, x0 + wbar * e, (y + 3.2) * e],
+                            radius=1.4 * e, fill="white")
+    return img.resize((size, size), Image.LANCZOS)
 
 
 def _area_trabalho_bottom() -> int:
@@ -250,11 +277,17 @@ class App:
         self.root.attributes("-topmost", True)
         self.root.attributes("-transparentcolor", TRANSPARENT)
         self.root.configure(bg=TRANSPARENT)
-        self.root.title("Transcritor Desktop")
+        self.root.title("SOIA Flow")
 
         # Fator de escala da tela (1.0 = 100%, 1.25 = 125%…)
         fator = self.root.winfo_fpixels("1i") / 96.0
         self.S = lambda px: int(round(px * fator))
+
+        # Fonte da marca: Inter se instalada; senão, Segoe UI
+        try:
+            self._fam = "Inter" if "Inter" in tkfont.families() else "Segoe UI"
+        except Exception:
+            self._fam = "Segoe UI"
 
         self._sw     = self.root.winfo_screenwidth()
         self._bottom = _area_trabalho_bottom() - self.S(8)
@@ -354,8 +387,8 @@ class App:
                              lambda: self._queue.put(("toggle",))),
             pystray.MenuItem("Fechar", self._quit),
         )
-        self._tray = pystray.Icon("transcritor", _make_tray_image(),
-                                  "Transcritor Desktop", menu)
+        self._tray = pystray.Icon("soiaflow", _logo_soia(),
+                                  "SOIA Flow", menu)
         threading.Thread(target=self._tray_run, daemon=True).start()
 
     def _tray_run(self):
@@ -524,10 +557,10 @@ class App:
         cv = self._reset_canvas(W, H)
         cv.configure(cursor="hand2")
         cy = H // 2
-        # Círculo do microfone
+        # Círculo do microfone — verde SOIA
         r = S(13)
         circ = cv.create_oval(S(28) - r, cy - r, S(28) + r, cy + r,
-                              fill="#2a2a2a", outline="")
+                              fill=VERDE, outline="")
         cv.create_text(S(28), cy, text=ICO_MIC, fill=WHITE,
                        font=("Segoe MDL2 Assets", 11))
         cv.create_text(x_txt, cy, text="Ditar", fill=WHITE, anchor="w",
@@ -535,8 +568,8 @@ class App:
         cv.create_text(x_txt + w_dit + S(10), cy, text=atalho, fill=MUTED,
                        anchor="w", font=f_atalho)
         cv.bind("<Button-1>", lambda _: self._toggle())
-        cv.bind("<Enter>", lambda _: cv.itemconfig(circ, fill="#383838"))
-        cv.bind("<Leave>", lambda _: cv.itemconfig(circ, fill="#2a2a2a"))
+        cv.bind("<Enter>", lambda _: cv.itemconfig(circ, fill=VERDE_VIVO))
+        cv.bind("<Leave>", lambda _: cv.itemconfig(circ, fill=VERDE))
         self._vigiar_hover()
 
     def _vigiar_hover(self):
@@ -691,7 +724,7 @@ class App:
             half = max(1, int(amp * maxh))
             x = x0 + i * (bw + gap)
             cv.create_rectangle(x, mid - half, x + bw - 1, mid + half,
-                                fill="#cfcfcf", outline="")
+                                fill=VERDE_VIVO, outline="")
 
     def _spin(self):
         if self._estado != "processing":
@@ -885,8 +918,9 @@ class App:
     def _botao(self, parent, txt, cmd, primario=False):
         bg = ACCENT if primario else FIELD_BG
         hv = ACCENT_HOV if primario else FIELD_HOV
-        fonte = ("Segoe UI", 10, "bold") if primario else ("Segoe UI", 9)
-        b = tk.Label(parent, text=txt, bg=bg, fg=WHITE, font=fonte,
+        fg = WHITE if primario else TINTA
+        fonte = (self._fam, 10, "bold") if primario else (self._fam, 9)
+        b = tk.Label(parent, text=txt, bg=bg, fg=fg, font=fonte,
                      padx=16, pady=6, cursor="hand2")
         b.bind("<Enter>", lambda e: b.config(bg=hv))
         b.bind("<Leave>", lambda e: b.config(bg=bg))
@@ -900,35 +934,53 @@ class App:
             return
         w = tk.Toplevel(self.root)
         self._win_cfg = w
-        w.title("Transcritor — Configurações")
+        w.title("SOIA Flow — Configurações")
         w.configure(bg=SET_BG)
         w.resizable(False, False)
         w.attributes("-topmost", True)
         w.withdraw()   # mostra só depois de montar (evita salto de tamanho)
 
+        try:
+            self._logo_tk = ImageTk.PhotoImage(_logo_soia(40))
+            w.iconphoto(False, ImageTk.PhotoImage(_logo_soia(32)))
+        except Exception:
+            self._logo_tk = None
+
         PADX = 28
 
         def lbl(parent, txt, **kw):
-            base = dict(bg=SET_BG, fg=WHITE, font=("Segoe UI", 10), anchor="w")
+            base = dict(bg=SET_BG, fg=TINTA, font=(self._fam, 10), anchor="w")
             base.update(kw)
             return tk.Label(parent, text=txt, **base)
 
         def secao(txt, topo=18):
-            lbl(w, txt, font=("Segoe UI", 10, "bold")).pack(
+            lbl(w, txt, font=(self._fam, 10, "bold")).pack(
                 padx=PADX, pady=(topo, 6), anchor="w")
 
         def separador():
             tk.Frame(w, bg=SEP, height=1).pack(fill="x", padx=PADX, pady=(18, 0))
 
         def entrada(parent, **kw):
-            e = tk.Entry(parent, bg=FIELD_BG, fg=WHITE, insertbackground=WHITE,
+            e = tk.Entry(parent, bg=FIELD_BG, fg=TINTA, insertbackground=TINTA,
                          relief="flat", font=("Consolas", 10),
-                         highlightthickness=1, highlightbackground="#454545",
+                         highlightthickness=1, highlightbackground=FIO,
                          highlightcolor=ACCENT, **kw)
             return e
 
+        # ── Cabeçalho com a marca ──
+        cab = tk.Frame(w, bg=SET_BG)
+        cab.pack(fill="x", padx=PADX, pady=(20, 0))
+        if self._logo_tk is not None:
+            tk.Label(cab, image=self._logo_tk, bg=SET_BG).pack(side=tk.LEFT)
+        cab_txt = tk.Frame(cab, bg=SET_BG)
+        cab_txt.pack(side=tk.LEFT, padx=(10, 0))
+        tk.Label(cab_txt, text="SOIA Flow", bg=SET_BG, fg=TINTA,
+                 font=(self._fam, 14, "bold"), anchor="w").pack(anchor="w")
+        tk.Label(cab_txt, text="Ditado por voz · SOIA CRC", bg=SET_BG,
+                 fg=TINTA_3, font=(self._fam, 9), anchor="w").pack(anchor="w")
+
         # ── Token ──
-        secao("Token do Groq", topo=22)
+        secao("Token do Groq", topo=20)
         linha_tok = tk.Frame(w, bg=SET_BG)
         linha_tok.pack(fill="x", padx=PADX)
         ent_token = entrada(linha_tok, show="•")
@@ -936,26 +988,26 @@ class App:
         ent_token.insert(0, self.obter_token())
         def _toggle_ver(_=None):
             ent_token.config(show="" if ent_token.cget("show") else "•")
-        olho = tk.Label(linha_tok, text="👁", bg=FIELD_BG, fg=MUTED,
-                        padx=10, cursor="hand2", font=("Segoe UI", 10))
+        olho = tk.Label(linha_tok, text="👁", bg=FIELD_BG, fg=TINTA_3,
+                        padx=10, cursor="hand2", font=(self._fam, 10))
         olho.pack(side=tk.LEFT, padx=(6, 0), ipady=4)
         olho.bind("<Button-1>", _toggle_ver)
-        olho.bind("<Enter>", lambda e: olho.config(fg=WHITE))
-        olho.bind("<Leave>", lambda e: olho.config(fg=MUTED))
+        olho.bind("<Enter>", lambda e: olho.config(fg=TINTA))
+        olho.bind("<Leave>", lambda e: olho.config(fg=TINTA_3))
         lbl(w, "Crie o seu em console.groq.com/keys — é gratuito.",
-            fg=MUTED, font=("Segoe UI", 8)).pack(padx=PADX, pady=(4, 0),
-                                                 anchor="w")
+            fg=TINTA_3, font=(self._fam, 8)).pack(padx=PADX, pady=(4, 0),
+                                                  anchor="w")
 
         linha_teste = tk.Frame(w, bg=SET_BG)
         linha_teste.pack(fill="x", padx=PADX, pady=(10, 0))
-        lbl_teste = tk.Label(linha_teste, text="", bg=SET_BG, fg=MUTED,
-                             font=("Segoe UI", 9))
+        lbl_teste = tk.Label(linha_teste, text="", bg=SET_BG, fg=TINTA_3,
+                             font=(self._fam, 9))
         def _testar():
             tok = ent_token.get().strip()
             if not tok:
-                lbl_teste.config(text="Informe o token primeiro", fg=DOT_RED)
+                lbl_teste.config(text="Informe o token primeiro", fg=VERMELHO)
                 return
-            lbl_teste.config(text="Testando…", fg=MUTED)
+            lbl_teste.config(text="Testando…", fg=TINTA_3)
             def _th():
                 try:
                     r = requests.get(f"{GROQ_URL}/models",
@@ -964,15 +1016,15 @@ class App:
                     if r.status_code == 200:
                         self._queue.put(("teste",
                                          "✓ Conexão OK — token salvo",
-                                         GREEN, tok))
+                                         VERDE, tok))
                     elif r.status_code == 401:
                         self._queue.put(("teste", "✕ Token inválido",
-                                         DOT_RED, None))
+                                         VERMELHO, None))
                     else:
                         self._queue.put(("teste", f"✕ Erro {r.status_code}",
-                                         DOT_RED, None))
+                                         VERMELHO, None))
                 except Exception:
-                    self._queue.put(("teste", "✕ Sem conexão", DOT_RED, None))
+                    self._queue.put(("teste", "✕ Sem conexão", VERMELHO, None))
             threading.Thread(target=_th, daemon=True).start()
         self._botao(linha_teste, "Testar conexão", _testar).pack(side=tk.LEFT)
         lbl_teste.pack(side=tk.LEFT, padx=(12, 0))
@@ -989,20 +1041,20 @@ class App:
                              ("Máxima qualidade (whisper-large-v3)",
                               "whisper-large-v3")):
             tk.Radiobutton(w, text=texto, variable=var_modelo, value=valor,
-                           bg=SET_BG, fg=WHITE, selectcolor=FIELD_BG,
-                           activebackground=SET_BG, activeforeground=WHITE,
+                           bg=SET_BG, fg=TINTA, selectcolor=SET_BG,
+                           activebackground=SET_BG, activeforeground=TINTA,
                            highlightthickness=0,
-                           font=("Segoe UI", 9)).pack(padx=PADX - 4, anchor="w")
+                           font=(self._fam, 9)).pack(padx=PADX - 4, anchor="w")
 
         linha_idi = tk.Frame(w, bg=SET_BG)
         linha_idi.pack(fill="x", padx=PADX, pady=(10, 0))
-        tk.Label(linha_idi, text="Idioma:", bg=SET_BG, fg=WHITE,
-                 font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
+        tk.Label(linha_idi, text="Idioma:", bg=SET_BG, fg=TINTA,
+                 font=(self._fam, 10, "bold")).pack(side=tk.LEFT)
         ent_idioma = entrada(linha_idi, width=6, justify="center")
         ent_idioma.pack(side=tk.LEFT, padx=(10, 8), ipady=3)
         ent_idioma.insert(0, self.cfg.get("idioma", "pt"))
-        tk.Label(linha_idi, text="(pt, en, es… ou auto)", bg=SET_BG, fg=MUTED,
-                 font=("Segoe UI", 8)).pack(side=tk.LEFT)
+        tk.Label(linha_idi, text="(pt, en, es… ou auto)", bg=SET_BG, fg=TINTA_3,
+                 font=(self._fam, 8)).pack(side=tk.LEFT)
 
         separador()
 
@@ -1010,13 +1062,13 @@ class App:
         secao("Dicionário personalizado")
         lbl(w, "Nomes e termos do seu dia a dia, separados por vírgula\n"
                "(ex.: SOIA, CRC, Grazziotin). Ajuda o Groq a grafar certo.",
-            fg=MUTED, font=("Segoe UI", 8), justify="left").pack(
+            fg=TINTA_3, font=(self._fam, 8), justify="left").pack(
             padx=PADX, pady=(0, 6), anchor="w")
-        borda_dic = tk.Frame(w, bg="#454545", padx=1, pady=1)
+        borda_dic = tk.Frame(w, bg=FIO, padx=1, pady=1)
         borda_dic.pack(fill="x", padx=PADX)
-        txt_dicio = tk.Text(borda_dic, bg=FIELD_BG, fg=WHITE,
-                            insertbackground=WHITE, relief="flat",
-                            font=("Segoe UI", 9), wrap="word",
+        txt_dicio = tk.Text(borda_dic, bg=FIELD_BG, fg=TINTA,
+                            insertbackground=TINTA, relief="flat",
+                            font=(self._fam, 9), wrap="word",
                             height=3, padx=8, pady=6)
         txt_dicio.pack(fill="x")
         txt_dicio.insert("1.0", self.cfg.get("dicionario", ""))
@@ -1029,14 +1081,14 @@ class App:
         linha_hk.pack(fill="x", padx=PADX)
         self._novo_atalho = self.cfg.get("atalho", CONFIG_PADRAO["atalho"])
         lbl_hk = tk.Label(linha_hk, text=self._novo_atalho, bg=FIELD_BG,
-                          fg=WHITE, font=("Consolas", 10), padx=14, pady=6)
+                          fg=TINTA, font=("Consolas", 10), padx=14, pady=6)
         lbl_hk.pack(side=tk.LEFT)
         self._lbl_hk = lbl_hk
         def _capturar():
             if self._capturando:
                 return
             self._capturando = True
-            lbl_hk.config(text="Pressione a nova combinação…", fg=MUTED)
+            lbl_hk.config(text="Pressione a nova combinação…", fg=TINTA_3)
             self._remover_atalho()   # não disparar gravação durante a captura
             def _th():
                 try:
@@ -1054,9 +1106,9 @@ class App:
         var_fechar = tk.BooleanVar(value=self.cfg.get("fechar_apos", True))
         var_auto   = tk.BooleanVar(value=self.cfg.get("autostart", False))
         var_paste  = tk.BooleanVar(value=self.cfg.get("autopaste", True))
-        estilo_chk = dict(bg=SET_BG, fg=WHITE, selectcolor=FIELD_BG,
-                          activebackground=SET_BG, activeforeground=WHITE,
-                          highlightthickness=0, font=("Segoe UI", 9))
+        estilo_chk = dict(bg=SET_BG, fg=TINTA, selectcolor=SET_BG,
+                          activebackground=SET_BG, activeforeground=TINTA,
+                          highlightthickness=0, font=(self._fam, 9))
         tk.Checkbutton(w, text="Colar automaticamente onde o cursor estiver",
                        variable=var_paste, **estilo_chk).pack(
             padx=PADX - 4, pady=(16, 0), anchor="w")
@@ -1091,8 +1143,8 @@ class App:
         rodape = tk.Frame(w, bg=SET_BG)
         rodape.pack(fill="x", padx=PADX, pady=(24, 10))
         self._botao(rodape, "Salvar", _salvar, primario=True).pack(fill="x")
-        tk.Label(w, text=f"Transcritor Desktop {VERSAO}", bg=SET_BG,
-                 fg="#555555", font=("Segoe UI", 8)).pack(pady=(0, 10))
+        tk.Label(w, text=f"SOIA Flow {VERSAO}", bg=SET_BG,
+                 fg="#a6acb5", font=(self._fam, 8)).pack(pady=(0, 10))
 
         def _fechar():
             # Se fechou sem salvar durante uma captura, restaura o atalho atual
@@ -1114,7 +1166,7 @@ class App:
         if combo:
             self._novo_atalho = combo
         if self._lbl_hk is not None and self._lbl_hk.winfo_exists():
-            self._lbl_hk.config(text=self._novo_atalho, fg=WHITE)
+            self._lbl_hk.config(text=self._novo_atalho, fg=TINTA)
         # Reativa o atalho vigente (o novo só vale após Salvar)
         self._registrar_atalho()
 
@@ -1137,15 +1189,25 @@ def _aplicar_autostart(ativo: bool):
     """Cria/remove o .bat na pasta Inicializar do Windows."""
     startup = os.path.join(os.environ["APPDATA"],
                            r"Microsoft\Windows\Start Menu\Programs\Startup")
-    bat = os.path.join(startup, "TranscritorDesktop.bat")
+    bat = os.path.join(startup, "SOIAFlow.bat")
+    # Remove o nome antigo, de antes do rebrand
+    legado = os.path.join(startup, "TranscritorDesktop.bat")
+    if os.path.exists(legado):
+        try: os.remove(legado)
+        except Exception: pass
     if ativo:
-        py  = sys.executable
-        pyw = os.path.join(os.path.dirname(py), "pythonw.exe")
-        if not os.path.exists(pyw):
-            pyw = py
-        script = os.path.abspath(__file__)
+        if getattr(sys, "frozen", False):
+            # Empacotado com PyInstaller: o executável é o próprio app
+            comando = f'start "" "{sys.executable}"'
+        else:
+            py  = sys.executable
+            pyw = os.path.join(os.path.dirname(py), "pythonw.exe")
+            if not os.path.exists(pyw):
+                pyw = py
+            script = os.path.abspath(__file__)
+            comando = f'start "" "{pyw}" "{script}"'
         with open(bat, "w", encoding="ascii", errors="replace") as f:
-            f.write(f'@echo off\nstart "" "{pyw}" "{script}"\n')
+            f.write(f"@echo off\n{comando}\n")
         log.info("Autostart criado: %s", bat)
     elif os.path.exists(bat):
         os.remove(bat)
