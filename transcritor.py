@@ -45,7 +45,7 @@ if not any(isinstance(h, logging.FileHandler) for h in _root_log.handlers):
 _root_log.setLevel(logging.INFO)
 log = logging.getLogger("app")
 
-log.info("=== SOIA Flow v2.2 — iniciando ===")
+log.info("=== SOIA Flow v2.3 — iniciando ===")
 
 # ── Imports ────────────────────────────────────────────────────────────────────
 import ctypes
@@ -121,7 +121,7 @@ def _save_config(cfg: dict):
 TAXA        = 16000            # Hz — o que o Whisper espera
 GROQ_URL    = "https://api.groq.com/openai/v1"
 MAX_SEG     = 900              # auto-para após 15 min de gravação
-VERSAO      = "v 2.2"
+VERSAO      = "v 2.3"
 
 # Design — balões pretos com borda cinza sutil (estilo Wispr).
 # TRANSPARENT é a cor-chave da janela: os balões são renderizados em PIL com
@@ -222,13 +222,15 @@ def _logo_soia(size: int = 64) -> Image.Image:
         [0, 0, s - 1, s - 1], radius=int(s * 7 / 32), fill=255)
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     img.paste(grad, (0, 0), mask)
-    # Funil: três barras brancas decrescentes
+    # Funil: três barras brancas decrescentes — topo reto, base arredondada
+    # (mesmo acabamento do favicon.svg original)
     d = ImageDraw.Draw(img)
     e = s / 32
     for wbar, y in ((24.0, 8.0), (15.6, 14.4), (7.6, 20.8)):
         x0 = (32 - wbar) / 2 * e
         d.rounded_rectangle([x0, y * e, x0 + wbar * e, (y + 3.2) * e],
-                            radius=1.4 * e, fill="white")
+                            radius=1.6 * e, fill="white",
+                            corners=(False, False, True, True))
     return img.resize((size, size), Image.LANCZOS)
 
 
@@ -1021,13 +1023,9 @@ class App:
             base.update(kw)
             return tk.Label(parent, text=txt, **base)
 
-        def secao(txt, topo=18):
-            lbl(w, txt, font=(self._fam, 10, "bold")).pack(
-                padx=PADX, pady=(topo, 6), anchor="w")
-
-        def separador():
-            tk.Frame(w, bg=SEP, height=1).pack(fill="x", padx=PADX,
-                                               pady=(18, 0))
+        def secao(parent, txt, topo=16):
+            lbl(parent, txt, font=(self._fam, 10, "bold")).pack(
+                pady=(topo, 6), anchor="w")
 
         # ── Cabeçalho com a marca ──
         cab = tk.Frame(w, bg=SET_BG)
@@ -1041,10 +1039,66 @@ class App:
         tk.Label(cab_txt, text="Ditado por voz · SOIA CRC", bg=SET_BG,
                  fg=TINTA_3, font=(self._fam, 9), anchor="w").pack(anchor="w")
 
-        # ── Token ──
-        secao("Token do Groq", topo=20)
-        cx_tok = self._caixa_redonda(w, INNER, S(36))
-        cx_tok.pack(padx=PADX, anchor="w")
+        # ── Barra de abas ──
+        barra = tk.Frame(w, bg=SET_BG)
+        barra.pack(fill="x", padx=PADX, pady=(16, 12))
+        TW = (INNER - 2 * S(8)) // 3
+        TH = S(32)
+        img_on  = self._painel_claro(TW, TH, S(9), VERDE_SUAVE)
+        img_off = self._painel_claro(TW, TH, S(9), SET_BG)
+        img_hov = self._painel_claro(TW, TH, S(9), FIELD_BG)
+        self._abas = {}
+        conteudo = {}
+        self._aba_atual = "groq"
+
+        def _mostrar(nome):
+            self._aba_atual = nome
+            for n, (cv_t, txt_t) in self._abas.items():
+                ativo = (n == nome)
+                cv_t.itemconfig(cv_t._bgid,
+                                image=img_on if ativo else img_off)
+                cv_t.itemconfig(txt_t,
+                                fill=VERDE_ESC if ativo else TINTA_3)
+            for fr in conteudo.values():
+                fr.pack_forget()
+            conteudo[nome].pack(fill="both", expand=True)
+
+        def _aba(nome, rotulo, primeira=False):
+            cv_t = tk.Canvas(barra, width=TW, height=TH, bg=SET_BG,
+                             highlightthickness=0, cursor="hand2")
+            cv_t._imgs = (img_on, img_off, img_hov)
+            cv_t._bgid = cv_t.create_image(0, 0, anchor="nw", image=img_off)
+            txt_t = cv_t.create_text(TW // 2, TH // 2, text=rotulo,
+                                     fill=TINTA_3,
+                                     font=(self._fam, 9, "bold"))
+            cv_t.bind("<Button-1>", lambda e: _mostrar(nome))
+            def _entra(_e, n=nome, c=cv_t):
+                if self._aba_atual != n:
+                    c.itemconfig(c._bgid, image=img_hov)
+            def _sai(_e, n=nome, c=cv_t):
+                if self._aba_atual != n:
+                    c.itemconfig(c._bgid, image=img_off)
+            cv_t.bind("<Enter>", _entra)
+            cv_t.bind("<Leave>", _sai)
+            cv_t.pack(side=tk.LEFT, padx=(0 if primeira else S(8), 0))
+            self._abas[nome] = (cv_t, txt_t)
+
+        _aba("groq", "Groq", primeira=True)
+        _aba("dic", "Dicionário")
+        _aba("cfg", "Configurações")
+
+        # ── Conteúdo das abas ──
+        cont = tk.Frame(w, bg=SET_BG)
+        cont.pack(padx=PADX, fill="x")
+        f_groq = tk.Frame(cont, bg=SET_BG)
+        f_dic  = tk.Frame(cont, bg=SET_BG)
+        f_cfg  = tk.Frame(cont, bg=SET_BG)
+        conteudo.update({"groq": f_groq, "dic": f_dic, "cfg": f_cfg})
+
+        # ═══ Aba Groq: token, modelo e idioma ═══
+        secao(f_groq, "Token do Groq", topo=4)
+        cx_tok = self._caixa_redonda(f_groq, INNER, S(36))
+        cx_tok.pack(anchor="w")
         ent_token = tk.Entry(cx_tok, bg=FIELD_BG, fg=TINTA,
                              insertbackground=TINTA, relief="flat",
                              font=("Consolas", 10), show="•",
@@ -1061,12 +1115,11 @@ class App:
                         lambda _: cx_tok.itemconfig(olho, fill=TINTA))
         cx_tok.tag_bind(olho, "<Leave>",
                         lambda _: cx_tok.itemconfig(olho, fill=TINTA_3))
-        lbl(w, "Crie o seu em console.groq.com/keys — é gratuito.",
-            fg=TINTA_3, font=(self._fam, 8)).pack(padx=PADX, pady=(4, 0),
-                                                  anchor="w")
+        lbl(f_groq, "Crie o seu em console.groq.com/keys — é gratuito.",
+            fg=TINTA_3, font=(self._fam, 8)).pack(pady=(4, 0), anchor="w")
 
-        linha_teste = tk.Frame(w, bg=SET_BG)
-        linha_teste.pack(fill="x", padx=PADX, pady=(10, 0))
+        linha_teste = tk.Frame(f_groq, bg=SET_BG)
+        linha_teste.pack(fill="x", pady=(10, 0))
         lbl_teste = tk.Label(linha_teste, text="", bg=SET_BG, fg=TINTA_3,
                              font=(self._fam, 9))
         def _testar():
@@ -1097,61 +1150,65 @@ class App:
         lbl_teste.pack(side=tk.LEFT, padx=(12, 0))
         self._lbl_teste = lbl_teste
 
-        separador()
-
-        # ── Modelo e idioma ──
-        secao("Modelo")
+        secao(f_groq, "Modelo")
         var_modelo = tk.StringVar(value=self.cfg.get("modelo",
                                                      CONFIG_PADRAO["modelo"]))
         for texto, valor in (("Rápido (whisper-large-v3-turbo) — recomendado",
                               "whisper-large-v3-turbo"),
                              ("Máxima qualidade (whisper-large-v3)",
                               "whisper-large-v3")):
-            tk.Radiobutton(w, text=texto, variable=var_modelo, value=valor,
-                           bg=SET_BG, fg=TINTA, selectcolor=SET_BG,
-                           activebackground=SET_BG, activeforeground=TINTA,
-                           highlightthickness=0,
-                           font=(self._fam, 9)).pack(padx=PADX - 4, anchor="w")
+            tk.Radiobutton(f_groq, text=texto, variable=var_modelo,
+                           value=valor, bg=SET_BG, fg=TINTA,
+                           selectcolor=SET_BG, activebackground=SET_BG,
+                           activeforeground=TINTA, highlightthickness=0,
+                           font=(self._fam, 9)).pack(anchor="w")
 
-        linha_idi = tk.Frame(w, bg=SET_BG)
-        linha_idi.pack(fill="x", padx=PADX, pady=(10, 0))
+        IDIOMAS = [("Português (Brasil)", "pt"), ("Inglês", "en"),
+                   ("Espanhol", "es"), ("Francês", "fr"),
+                   ("Italiano", "it"), ("Alemão", "de"),
+                   ("Detectar automaticamente", "auto")]
+        linha_idi = tk.Frame(f_groq, bg=SET_BG)
+        linha_idi.pack(fill="x", pady=(12, 8))
         tk.Label(linha_idi, text="Idioma:", bg=SET_BG, fg=TINTA,
                  font=(self._fam, 10, "bold")).pack(side=tk.LEFT)
-        cx_idi = self._caixa_redonda(linha_idi, S(64), S(30))
-        cx_idi.pack(side=tk.LEFT, padx=(10, 8))
-        ent_idioma = tk.Entry(cx_idi, bg=FIELD_BG, fg=TINTA,
-                              insertbackground=TINTA, relief="flat",
-                              font=("Consolas", 10), justify="center",
-                              highlightthickness=0, bd=0)
-        cx_idi.create_window(S(32), S(15), window=ent_idioma, width=S(48))
-        ent_idioma.insert(0, self.cfg.get("idioma", "pt"))
-        tk.Label(linha_idi, text="(pt, en, es… ou auto)", bg=SET_BG,
-                 fg=TINTA_3, font=(self._fam, 8)).pack(side=tk.LEFT)
+        cod_atual = (self.cfg.get("idioma") or "pt").strip().lower()
+        rot_atual = next((r for r, c in IDIOMAS if c == cod_atual),
+                         IDIOMAS[0][0])
+        var_idioma = tk.StringVar(value=rot_atual)
+        om = tk.OptionMenu(linha_idi, var_idioma,
+                           *[r for r, _ in IDIOMAS])
+        om.config(bg=FIELD_BG, fg=TINTA, activebackground=FIELD_HOV,
+                  activeforeground=TINTA, relief="flat", bd=0,
+                  highlightthickness=0, font=(self._fam, 9),
+                  padx=12, pady=4, cursor="hand2", anchor="w")
+        om["menu"].config(bg=SET_BG, fg=TINTA, font=(self._fam, 9),
+                          activebackground=VERDE_SUAVE,
+                          activeforeground=VERDE_ESC, bd=0)
+        om.pack(side=tk.LEFT, padx=(10, 0))
 
-        separador()
-
-        # ── Dicionário personalizado ──
-        secao("Dicionário personalizado")
-        lbl(w, "Nomes e termos do seu dia a dia, separados por vírgula\n"
-               "(ex.: SOIA, CRC, Grazziotin). Ajuda o Groq a grafar certo.",
+        # ═══ Aba Dicionário ═══
+        secao(f_dic, "Dicionário personalizado", topo=4)
+        lbl(f_dic, "Nomes e termos do seu dia a dia, separados por vírgula\n"
+                   "(ex.: SOIA, CRC, Grazziotin). São enviados como contexto\n"
+                   "ao Groq, que passa a grafá-los corretamente.",
             fg=TINTA_3, font=(self._fam, 8), justify="left").pack(
-            padx=PADX, pady=(0, 6), anchor="w")
-        cx_dic = self._caixa_redonda(w, INNER, S(78), r=S(10))
-        cx_dic.pack(padx=PADX, anchor="w")
+            pady=(0, 8), anchor="w")
+        cx_dic = self._caixa_redonda(f_dic, INNER, S(150), r=S(10))
+        cx_dic.pack(anchor="w", pady=(0, 8))
         txt_dicio = tk.Text(cx_dic, bg=FIELD_BG, fg=TINTA,
                             insertbackground=TINTA, relief="flat",
                             font=(self._fam, 9), wrap="word",
                             highlightthickness=0, bd=0)
-        cx_dic.create_window(INNER // 2, S(39), window=txt_dicio,
-                             width=INNER - S(26), height=S(60))
+        cx_dic.create_window(INNER // 2, S(75), window=txt_dicio,
+                             width=INNER - S(26), height=S(132))
         txt_dicio.insert("1.0", self.cfg.get("dicionario", ""))
 
-        separador()
-
-        # ── Atalho ──
-        secao("Atalho global  (segure para falar, solte para transcrever)")
-        linha_hk = tk.Frame(w, bg=SET_BG)
-        linha_hk.pack(fill="x", padx=PADX)
+        # ═══ Aba Configurações: atalho e comportamento ═══
+        secao(f_cfg, "Atalho global", topo=4)
+        lbl(f_cfg, "Segure para falar, solte para transcrever.",
+            fg=TINTA_3, font=(self._fam, 8)).pack(pady=(0, 6), anchor="w")
+        linha_hk = tk.Frame(f_cfg, bg=SET_BG)
+        linha_hk.pack(fill="x")
         self._novo_atalho = self.cfg.get("atalho", CONFIG_PADRAO["atalho"])
         cx_hk = self._caixa_redonda(linha_hk, INNER - S(104), S(32))
         cx_hk.pack(side=tk.LEFT)
@@ -1178,34 +1235,40 @@ class App:
         self._botao(linha_hk, "Alterar…", _capturar).pack(
             side=tk.LEFT, padx=(S(10), 0))
 
-        separador()
-
-        # ── Comportamento ──
+        secao(f_cfg, "Comportamento")
         var_fechar = tk.BooleanVar(value=self.cfg.get("fechar_apos", True))
         var_auto   = tk.BooleanVar(value=self.cfg.get("autostart", False))
         var_paste  = tk.BooleanVar(value=self.cfg.get("autopaste", True))
         estilo_chk = dict(bg=SET_BG, fg=TINTA, selectcolor=SET_BG,
                           activebackground=SET_BG, activeforeground=TINTA,
                           highlightthickness=0, font=(self._fam, 9))
-        tk.Checkbutton(w, text="Colar automaticamente onde o cursor estiver",
-                       variable=var_paste, **estilo_chk).pack(
-            padx=PADX - 4, pady=(16, 0), anchor="w")
-        tk.Checkbutton(w, text="Ao terminar, apenas copiar e recolher\n"
-                               "(desmarcado: abre a caixa com texto editável)",
+        tk.Checkbutton(f_cfg, text="Colar automaticamente onde o cursor "
+                                   "estiver",
+                       variable=var_paste, **estilo_chk).pack(anchor="w")
+        tk.Checkbutton(f_cfg, text="Ao terminar, apenas copiar e recolher\n"
+                                   "(desmarcado: abre a caixa com texto "
+                                   "editável)",
                        variable=var_fechar, justify="left",
-                       **estilo_chk).pack(padx=PADX - 4, pady=(4, 0),
-                                          anchor="w")
-        tk.Checkbutton(w, text="Iniciar junto com o Windows",
+                       **estilo_chk).pack(pady=(4, 0), anchor="w")
+        tk.Checkbutton(f_cfg, text="Iniciar junto com o Windows",
                        variable=var_auto, **estilo_chk).pack(
-            padx=PADX - 4, pady=(4, 0), anchor="w")
+            pady=(4, 0), anchor="w")
 
-        # ── Salvar ──
+        # Altura fixa do miolo = a aba mais alta (a janela não "pula")
+        w.update_idletasks()
+        alt = max(f.winfo_reqheight() for f in (f_groq, f_dic, f_cfg))
+        cont.config(height=alt + S(6), width=INNER)
+        cont.pack_propagate(False)
+        _mostrar("groq")
+
+        # ── Rodapé: Salvar + versão ──
         def _salvar():
             tok = ent_token.get().strip()
             if tok:
                 self.salvar_token(tok)
             self.cfg["modelo"] = var_modelo.get()
-            self.cfg["idioma"] = ent_idioma.get().strip().lower() or "pt"
+            self.cfg["idioma"] = dict((r, c) for r, c in IDIOMAS).get(
+                var_idioma.get(), "pt")
             self.cfg["atalho"] = self._novo_atalho
             self.cfg["fechar_apos"] = var_fechar.get()
             self.cfg["autostart"] = var_auto.get()
@@ -1219,7 +1282,7 @@ class App:
             self._registrar_atalho()
             w.destroy()
         rodape = tk.Frame(w, bg=SET_BG)
-        rodape.pack(fill="x", padx=PADX, pady=(24, 10))
+        rodape.pack(fill="x", padx=PADX, pady=(14, 10))
         self._botao(rodape, "Salvar", _salvar, primario=True,
                     w_min=INNER).pack()
         tk.Label(w, text=f"SOIA Flow {VERSAO}", bg=SET_BG,
@@ -1232,7 +1295,7 @@ class App:
             w.destroy()
         w.protocol("WM_DELETE_WINDOW", _fechar)
 
-        # Altura ajustada ao conteúdo (nunca corta o Salvar) e centraliza
+        # Altura ajustada ao conteúdo e centraliza
         w.update_idletasks()
         altura = w.winfo_reqheight()
         sw, sh = w.winfo_screenwidth(), w.winfo_screenheight()

@@ -20,10 +20,12 @@ def logo(size: int) -> Image.Image:
     img.paste(grad, (0, 0), mask)
     d = ImageDraw.Draw(img)
     e = s / 32
+    # Topo reto, base arredondada — o acabamento do favicon.svg original
     for wbar, y in ((24.0, 8.0), (15.6, 14.4), (7.6, 20.8)):
         x0 = (32 - wbar) / 2 * e
         d.rounded_rectangle([x0, y * e, x0 + wbar * e, (y + 3.2) * e],
-                            radius=1.4 * e, fill="white")
+                            radius=1.6 * e, fill="white",
+                            corners=(False, False, True, True))
     return img.resize((size, size), Image.LANCZOS)
 
 
