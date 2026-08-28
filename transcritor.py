@@ -1036,7 +1036,7 @@ class App:
         cab_txt.pack(side=tk.LEFT, padx=(10, 0))
         tk.Label(cab_txt, text="SOIA Flow", bg=SET_BG, fg=TINTA,
                  font=(self._fam, 14, "bold"), anchor="w").pack(anchor="w")
-        tk.Label(cab_txt, text="Ditado por voz · SOIA CRC", bg=SET_BG,
+        tk.Label(cab_txt, text="Ditado por voz by SOIA CRC", bg=SET_BG,
                  fg=TINTA_3, font=(self._fam, 9), anchor="w").pack(anchor="w")
 
         # ── Barra de abas ──
