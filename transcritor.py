@@ -45,7 +45,7 @@ if not any(isinstance(h, logging.FileHandler) for h in _root_log.handlers):
 _root_log.setLevel(logging.INFO)
 log = logging.getLogger("app")
 
-log.info("=== SOIA Flow v2.1 — iniciando ===")
+log.info("=== SOIA Flow v2.2 — iniciando ===")
 
 # ── Imports ────────────────────────────────────────────────────────────────────
 import ctypes
@@ -121,7 +121,7 @@ def _save_config(cfg: dict):
 TAXA        = 16000            # Hz — o que o Whisper espera
 GROQ_URL    = "https://api.groq.com/openai/v1"
 MAX_SEG     = 900              # auto-para após 15 min de gravação
-VERSAO      = "v 2.1"
+VERSAO      = "v 2.2"
 
 # Design — balões pretos com borda cinza sutil (estilo Wispr).
 # TRANSPARENT é a cor-chave da janela: os balões são renderizados em PIL com
@@ -476,17 +476,42 @@ class App:
 
     def _painel(self, w, h, r=None, fill=PANEL_FILL, border=BORDER):
         """Retângulo arredondado suavizado (supersampling 4×) com borda de 1 px.
-        O fundo é a cor-chave transparente, então o antialias funde para ela."""
+        Borda por preenchimento duplo (nunca quebra nos cantos); o fundo é a
+        cor-chave transparente, então o antialias funde para ela."""
         if r is None:
             r = h // 2
         k = 4
         tr = tuple(int(TRANSPARENT[i:i+2], 16) for i in (1, 3, 5))
         img = Image.new("RGBA", (w * k, h * k), tr + (255,))
         d = ImageDraw.Draw(img)
-        d.rounded_rectangle([k // 2, k // 2, w * k - k // 2 - 1, h * k - k // 2 - 1],
-                            radius=r * k, fill=fill, outline=border, width=k)
+        d.rounded_rectangle([0, 0, w * k - 1, h * k - 1],
+                            radius=r * k, fill=border)
+        d.rounded_rectangle([k, k, w * k - 1 - k, h * k - 1 - k],
+                            radius=max(1, (r - 1) * k), fill=fill)
         img = img.resize((w, h), Image.LANCZOS)
         return ImageTk.PhotoImage(img)
+
+    def _icone_mic(self, dia: int, circulo: str) -> ImageTk.PhotoImage:
+        """Botão de microfone em alta resolução: círculo + mic branco (PIL 4×)."""
+        k = 4
+        s = dia * k
+        img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        cr = tuple(int(circulo[i:i+2], 16) for i in (1, 3, 5))
+        d.ellipse([0, 0, s - 1, s - 1], fill=cr + (255,))
+        br = (255, 255, 255, 255)
+        cx = s / 2
+        lw = max(k, int(s * 0.05))
+        bw = s * 0.11
+        d.rounded_rectangle([cx - bw, s * 0.20, cx + bw, s * 0.52],
+                            radius=bw, fill=br)
+        aw = s * 0.20
+        d.arc([cx - aw, s * 0.32, cx + aw, s * 0.62],
+              start=0, end=180, fill=br, width=lw)
+        d.line([cx, s * 0.62, cx, s * 0.70], fill=br, width=lw)
+        d.line([cx - s * 0.11, s * 0.735, cx + s * 0.11, s * 0.735],
+               fill=br, width=lw)
+        return ImageTk.PhotoImage(img.resize((dia, dia), Image.LANCZOS))
 
     def _reset_canvas(self, w, h, r=None, fill=PANEL_FILL, border=BORDER):
         if self._tid:
@@ -558,19 +583,19 @@ class App:
         cv = self._reset_canvas(W, H)
         cv.configure(cursor="hand2")
         cy = H // 2
-        # Círculo do microfone — verde SOIA
-        r = S(13)
-        circ = cv.create_oval(S(28) - r, cy - r, S(28) + r, cy + r,
-                              fill=VERDE, outline="")
-        cv.create_text(S(28), cy, text=ICO_MIC, fill=WHITE,
-                       font=("Segoe MDL2 Assets", 11))
+        # Botão do microfone — preto e branco, renderizado em PIL
+        dia = S(28)
+        self._mic_n = self._icone_mic(dia, "#2e2e2e")
+        self._mic_h = self._icone_mic(dia, "#3f3f3f")
+        cv._mics = (self._mic_n, self._mic_h)
+        mic = cv.create_image(S(28), cy, image=self._mic_n)
         cv.create_text(x_txt, cy, text="Ditar", fill=WHITE, anchor="w",
                        font=f_ditar)
         cv.create_text(x_txt + w_dit + S(10), cy, text=atalho, fill=MUTED,
                        anchor="w", font=f_atalho)
         cv.bind("<Button-1>", lambda _: self._toggle())
-        cv.bind("<Enter>", lambda _: cv.itemconfig(circ, fill=VERDE_VIVO))
-        cv.bind("<Leave>", lambda _: cv.itemconfig(circ, fill=VERDE))
+        cv.bind("<Enter>", lambda _: cv.itemconfig(mic, image=self._mic_h))
+        cv.bind("<Leave>", lambda _: cv.itemconfig(mic, image=self._mic_n))
         self._vigiar_hover()
 
     def _vigiar_hover(self):
@@ -591,18 +616,18 @@ class App:
         Iniciado por clique, ganha um ✕ para encerrar; por atalho
         (segurar/soltar), fica só o gráfico."""
         S = self.S
-        self._n_bars = 9
+        self._n_bars = 7
         por_clique = not self._inicio_por_tecla
-        W = S(80) if por_clique else S(56)
-        H = S(26)
+        W = S(86) if por_clique else S(62)
+        H = S(30)
         cv = self._reset_canvas(W, H)
         cv.configure(cursor="hand2")
-        bw, bh = S(50), S(18)
-        self._n_bars = 7
+        bw, bh = S(52), S(22)
         self._bars_dim = (bw, bh)
         self._cv_bars = tk.Canvas(cv, width=bw, height=bh,
                                   bg=PANEL_FILL, highlightthickness=0)
-        x_bars = S(30) if por_clique else W // 2
+        self._bars_item = self._cv_bars.create_image(0, 0, anchor="nw")
+        x_bars = S(32) if por_clique else W // 2
         cv.create_window(x_bars, H // 2, window=self._cv_bars)
         self._amp_history = [0.0] * self._n_bars
         self._draw_bars()
@@ -629,7 +654,7 @@ class App:
         S = self.S
         W, H = S(110), S(28)
         cv = self._reset_canvas(W, H)
-        cv.create_text(W // 2, H // 2, text="✓  Copiado", fill=GREEN,
+        cv.create_text(W // 2, H // 2, text="✓  Copiado", fill="#e8e8e8",
                        font=("Segoe UI", 9, "bold"))
         self._tid = self.root.after(900, lambda: self._state("pill"))
 
@@ -638,7 +663,7 @@ class App:
         msg_s = (msg[:46] + "…") if len(msg) > 46 else msg
         W, H = S(310), S(30)
         cv = self._reset_canvas(W, H)
-        cv.create_text(W // 2, H // 2, text=f"✕  {msg_s}", fill=DOT_RED,
+        cv.create_text(W // 2, H // 2, text=f"✕  {msg_s}", fill="#e8e8e8",
                        font=("Segoe UI", 9))
         self._tid = self.root.after(3000, lambda: self._state("pill"))
 
@@ -650,7 +675,7 @@ class App:
                         lambda: self._state("pill"), size=12)
         cv.create_text(W // 2, S(22),
                        text="✓  Copiado para a área de transferência",
-                       fill=GREEN, font=("Segoe UI", 9, "bold"))
+                       fill="#e8e8e8", font=("Segoe UI", 9, "bold"))
         borda = tk.Frame(cv, bg="#3d3d3d", padx=1, pady=1)
         interno = tk.Frame(borda, bg="#242424")
         interno.pack()
@@ -667,7 +692,7 @@ class App:
         cv.create_window(W // 2, S(134), window=borda)
         def _recopiar():
             self._clipboard_set(tb.get("1.0", "end-1c"))
-            cv.itemconfig(btn_copiar, text="✓ Copiado", fill=GREEN)
+            cv.itemconfig(btn_copiar, text="✓ Copiado", fill="#e8e8e8")
             self.root.after(1200, lambda: cv.itemconfig(
                 btn_copiar, text="⧉  Copiar", fill=MUTED))
         btn_copiar = cv.create_text(W // 2, H - S(24), text="⧉  Copiar",
@@ -712,22 +737,30 @@ class App:
         self._tid = self.root.after(80, self._tick)
 
     def _draw_bars(self):
+        """Barras de voz em pílula (pontas redondas), suavizadas em PIL 4×.
+        Em repouso viram bolinhas — o visual delicado do Wispr."""
         cv = self._cv_bars
         if cv is None or not cv.winfo_exists():
             return
-        cv.delete("all")
         W, H = self._bars_dim
         n = self._n_bars
-        bw = max(4, self.S(4))
-        gap = max(3, self.S(3))
-        x0 = max(0, (W - (n * bw + (n - 1) * gap)) // 2)
-        mid = H // 2
-        maxh = mid - 1
+        k = 4
+        pf = tuple(int(PANEL_FILL[i:i+2], 16) for i in (1, 3, 5))
+        img = Image.new("RGB", (W * k, H * k), pf)
+        d = ImageDraw.Draw(img)
+        bw  = max(4, self.S(4)) * k
+        gap = max(3, self.S(3)) * k
+        x0  = max(0, (W * k - (n * bw + (n - 1) * gap)) // 2)
+        mid = H * k // 2
+        maxh = mid - k
         for i, amp in enumerate(self._amp_history):
-            half = max(1, int(amp * maxh))
+            half = max(bw // 2, int(amp * maxh))
             x = x0 + i * (bw + gap)
-            cv.create_rectangle(x, mid - half, x + bw - 1, mid + half,
-                                fill=VERDE_VIVO, outline="")
+            d.rounded_rectangle([x, mid - half, x + bw - 1, mid + half],
+                                radius=bw // 2, fill=(232, 232, 232))
+        foto = ImageTk.PhotoImage(img.resize((W, H), Image.LANCZOS))
+        cv._foto = foto   # evita coleta de lixo
+        cv.itemconfig(self._bars_item, image=foto)
 
     def _spin(self):
         if self._estado != "processing":
