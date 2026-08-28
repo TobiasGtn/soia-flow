@@ -1,6 +1,7 @@
-# Transcritor Desktop
+# SOIA Flow
 
-Ditado por voz para Windows com Whisper na nuvem (Groq). Uma barrinha discreta
+Ditado por voz para Windows com Whisper na nuvem (Groq) — um adendo do
+serviço SOIA CRC. Uma barrinha discreta
 fica no centro-inferior da tela: segure o atalho global (padrão
 `Ctrl+Shift+Espaço`), fale e solte — o texto é transcrito em ~2 s, copiado para
 a área de transferência e colado automaticamente onde o cursor estiver.
