@@ -1,0 +1,6 @@
+sounddevice
+requests
+keyboard
+pystray
+Pillow
+keyring
