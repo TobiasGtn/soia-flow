@@ -45,7 +45,7 @@ if not any(isinstance(h, logging.FileHandler) for h in _root_log.handlers):
 _root_log.setLevel(logging.INFO)
 log = logging.getLogger("app")
 
-log.info("=== SOIA Flow v2.0 — iniciando ===")
+log.info("=== SOIA Flow v2.1 — iniciando ===")
 
 # ── Imports ────────────────────────────────────────────────────────────────────
 import ctypes
@@ -121,7 +121,7 @@ def _save_config(cfg: dict):
 TAXA        = 16000            # Hz — o que o Whisper espera
 GROQ_URL    = "https://api.groq.com/openai/v1"
 MAX_SEG     = 900              # auto-para após 15 min de gravação
-VERSAO      = "v 2.0"
+VERSAO      = "v 2.1"
 
 # Design — balões pretos com borda cinza sutil (estilo Wispr).
 # TRANSPARENT é a cor-chave da janela: os balões são renderizados em PIL com
@@ -149,8 +149,8 @@ ACCENT      = VERDE
 ACCENT_HOV  = VERDE_ESC
 # Tela de configurações — superfícies claras do SOIA
 SET_BG      = "#ffffff"
-FIELD_BG    = "#f4f4f5"
-FIELD_HOV   = "#e9eaec"
+FIELD_BG    = "#e9ebef"        # o cinza-fundo do SOIA: contraste visível
+FIELD_HOV   = "#dde0e5"
 SEP         = FIO
 
 SPINNER     = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
@@ -266,7 +266,8 @@ class App:
         self._hk_esc   = None
         self._win_cfg  = None
         self._capturando = False
-        self._lbl_hk   = None
+        self._hk_cv    = None
+        self._hk_item  = None
         self._lbl_teste = None
         self._novo_atalho = self.cfg.get("atalho", CONFIG_PADRAO["atalho"])
         self._inicio_por_tecla = False
@@ -596,7 +597,8 @@ class App:
         H = S(26)
         cv = self._reset_canvas(W, H)
         cv.configure(cursor="hand2")
-        bw, bh = S(46), S(18)
+        bw, bh = S(50), S(18)
+        self._n_bars = 7
         self._bars_dim = (bw, bh)
         self._cv_bars = tk.Canvas(cv, width=bw, height=bh,
                                   bg=PANEL_FILL, highlightthickness=0)
@@ -700,7 +702,8 @@ class App:
                 arr = array("h")
                 arr.frombytes(self._last_chunk)
                 pico = max(max(arr), -min(arr)) / 32768.0
-                amp = min(1.0, pico * 3.0)
+                # Raiz quadrada: fala normal (pico ~0,05-0,2) já enche as barras
+                amp = min(1.0, math.sqrt(pico * 4.0))
             except Exception:
                 pass
         self._amp_history.pop(0)
@@ -715,8 +718,8 @@ class App:
         cv.delete("all")
         W, H = self._bars_dim
         n = self._n_bars
-        bw = max(2, self.S(2))
-        gap = max(2, self.S(3))
+        bw = max(4, self.S(4))
+        gap = max(3, self.S(3))
         x0 = max(0, (W - (n * bw + (n - 1) * gap)) // 2)
         mid = H // 2
         maxh = mid - 1
@@ -915,17 +918,46 @@ class App:
 
     # ── Janela de configurações ────────────────────────────────────────────────
 
-    def _botao(self, parent, txt, cmd, primario=False):
+    def _painel_claro(self, w, h, r, fill, border=None):
+        """Retângulo arredondado suavizado para a tela clara (fundo SET_BG)."""
+        k = 4
+        bgc = tuple(int(SET_BG[i:i+2], 16) for i in (1, 3, 5))
+        img = Image.new("RGB", (w * k, h * k), bgc)
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle([0, 0, w * k - 1, h * k - 1], radius=r * k,
+                            fill=fill, outline=border or fill, width=k)
+        return ImageTk.PhotoImage(img.resize((w, h), Image.LANCZOS))
+
+    def _botao(self, parent, txt, cmd, primario=False, w_min=0):
+        """Botão de cantos arredondados (raio SOIA), desenhado em PIL."""
+        f = tkfont.Font(family=self._fam, size=10 if primario else 9,
+                        weight="bold" if primario else "normal")
+        W = max(w_min, f.measure(txt) + self.S(34))
+        H = self.S(34) if primario else self.S(30)
+        R = self.S(9)
         bg = ACCENT if primario else FIELD_BG
         hv = ACCENT_HOV if primario else FIELD_HOV
         fg = WHITE if primario else TINTA
-        fonte = (self._fam, 10, "bold") if primario else (self._fam, 9)
-        b = tk.Label(parent, text=txt, bg=bg, fg=fg, font=fonte,
-                     padx=16, pady=6, cursor="hand2")
-        b.bind("<Enter>", lambda e: b.config(bg=hv))
-        b.bind("<Leave>", lambda e: b.config(bg=bg))
-        b.bind("<Button-1>", lambda e: cmd())
-        return b
+        cv = tk.Canvas(parent, width=W, height=H, bg=SET_BG,
+                       highlightthickness=0, cursor="hand2")
+        img_n = self._painel_claro(W, H, R, bg)
+        img_h = self._painel_claro(W, H, R, hv)
+        cv._imgs = (img_n, img_h)
+        iid = cv.create_image(0, 0, anchor="nw", image=img_n)
+        cv.create_text(W // 2, H // 2, text=txt, fill=fg, font=f)
+        cv.bind("<Enter>", lambda e: cv.itemconfig(iid, image=img_h))
+        cv.bind("<Leave>", lambda e: cv.itemconfig(iid, image=img_n))
+        cv.bind("<Button-1>", lambda e: cmd())
+        return cv
+
+    def _caixa_redonda(self, parent, w, h, fill=None, r=None):
+        """Canvas com painel arredondado de fundo — abriga campos de texto."""
+        cv = tk.Canvas(parent, width=w, height=h, bg=SET_BG,
+                       highlightthickness=0)
+        img = self._painel_claro(w, h, r or self.S(9), fill or FIELD_BG)
+        cv._img = img
+        cv.create_image(0, 0, anchor="nw", image=img)
+        return cv
 
     def _abrir_config(self):
         if self._win_cfg is not None and self._win_cfg.winfo_exists():
@@ -946,7 +978,10 @@ class App:
         except Exception:
             self._logo_tk = None
 
-        PADX = 28
+        S = self.S
+        LARG  = S(440)
+        PADX  = S(26)
+        INNER = LARG - 2 * PADX
 
         def lbl(parent, txt, **kw):
             base = dict(bg=SET_BG, fg=TINTA, font=(self._fam, 10), anchor="w")
@@ -958,14 +993,8 @@ class App:
                 padx=PADX, pady=(topo, 6), anchor="w")
 
         def separador():
-            tk.Frame(w, bg=SEP, height=1).pack(fill="x", padx=PADX, pady=(18, 0))
-
-        def entrada(parent, **kw):
-            e = tk.Entry(parent, bg=FIELD_BG, fg=TINTA, insertbackground=TINTA,
-                         relief="flat", font=("Consolas", 10),
-                         highlightthickness=1, highlightbackground=FIO,
-                         highlightcolor=ACCENT, **kw)
-            return e
+            tk.Frame(w, bg=SEP, height=1).pack(fill="x", padx=PADX,
+                                               pady=(18, 0))
 
         # ── Cabeçalho com a marca ──
         cab = tk.Frame(w, bg=SET_BG)
@@ -981,19 +1010,24 @@ class App:
 
         # ── Token ──
         secao("Token do Groq", topo=20)
-        linha_tok = tk.Frame(w, bg=SET_BG)
-        linha_tok.pack(fill="x", padx=PADX)
-        ent_token = entrada(linha_tok, show="•")
-        ent_token.pack(side=tk.LEFT, fill="x", expand=True, ipady=6)
+        cx_tok = self._caixa_redonda(w, INNER, S(36))
+        cx_tok.pack(padx=PADX, anchor="w")
+        ent_token = tk.Entry(cx_tok, bg=FIELD_BG, fg=TINTA,
+                             insertbackground=TINTA, relief="flat",
+                             font=("Consolas", 10), show="•",
+                             highlightthickness=0, bd=0)
+        cx_tok.create_window(S(14), S(18), window=ent_token, anchor="w",
+                             width=INNER - S(54))
         ent_token.insert(0, self.obter_token())
         def _toggle_ver(_=None):
             ent_token.config(show="" if ent_token.cget("show") else "•")
-        olho = tk.Label(linha_tok, text="👁", bg=FIELD_BG, fg=TINTA_3,
-                        padx=10, cursor="hand2", font=(self._fam, 10))
-        olho.pack(side=tk.LEFT, padx=(6, 0), ipady=4)
-        olho.bind("<Button-1>", _toggle_ver)
-        olho.bind("<Enter>", lambda e: olho.config(fg=TINTA))
-        olho.bind("<Leave>", lambda e: olho.config(fg=TINTA_3))
+        olho = cx_tok.create_text(INNER - S(22), S(18), text="👁",
+                                  fill=TINTA_3, font=(self._fam, 10))
+        cx_tok.tag_bind(olho, "<Button-1>", _toggle_ver)
+        cx_tok.tag_bind(olho, "<Enter>",
+                        lambda _: cx_tok.itemconfig(olho, fill=TINTA))
+        cx_tok.tag_bind(olho, "<Leave>",
+                        lambda _: cx_tok.itemconfig(olho, fill=TINTA_3))
         lbl(w, "Crie o seu em console.groq.com/keys — é gratuito.",
             fg=TINTA_3, font=(self._fam, 8)).pack(padx=PADX, pady=(4, 0),
                                                   anchor="w")
@@ -1050,11 +1084,16 @@ class App:
         linha_idi.pack(fill="x", padx=PADX, pady=(10, 0))
         tk.Label(linha_idi, text="Idioma:", bg=SET_BG, fg=TINTA,
                  font=(self._fam, 10, "bold")).pack(side=tk.LEFT)
-        ent_idioma = entrada(linha_idi, width=6, justify="center")
-        ent_idioma.pack(side=tk.LEFT, padx=(10, 8), ipady=3)
+        cx_idi = self._caixa_redonda(linha_idi, S(64), S(30))
+        cx_idi.pack(side=tk.LEFT, padx=(10, 8))
+        ent_idioma = tk.Entry(cx_idi, bg=FIELD_BG, fg=TINTA,
+                              insertbackground=TINTA, relief="flat",
+                              font=("Consolas", 10), justify="center",
+                              highlightthickness=0, bd=0)
+        cx_idi.create_window(S(32), S(15), window=ent_idioma, width=S(48))
         ent_idioma.insert(0, self.cfg.get("idioma", "pt"))
-        tk.Label(linha_idi, text="(pt, en, es… ou auto)", bg=SET_BG, fg=TINTA_3,
-                 font=(self._fam, 8)).pack(side=tk.LEFT)
+        tk.Label(linha_idi, text="(pt, en, es… ou auto)", bg=SET_BG,
+                 fg=TINTA_3, font=(self._fam, 8)).pack(side=tk.LEFT)
 
         separador()
 
@@ -1064,13 +1103,14 @@ class App:
                "(ex.: SOIA, CRC, Grazziotin). Ajuda o Groq a grafar certo.",
             fg=TINTA_3, font=(self._fam, 8), justify="left").pack(
             padx=PADX, pady=(0, 6), anchor="w")
-        borda_dic = tk.Frame(w, bg=FIO, padx=1, pady=1)
-        borda_dic.pack(fill="x", padx=PADX)
-        txt_dicio = tk.Text(borda_dic, bg=FIELD_BG, fg=TINTA,
+        cx_dic = self._caixa_redonda(w, INNER, S(78), r=S(10))
+        cx_dic.pack(padx=PADX, anchor="w")
+        txt_dicio = tk.Text(cx_dic, bg=FIELD_BG, fg=TINTA,
                             insertbackground=TINTA, relief="flat",
                             font=(self._fam, 9), wrap="word",
-                            height=3, padx=8, pady=6)
-        txt_dicio.pack(fill="x")
+                            highlightthickness=0, bd=0)
+        cx_dic.create_window(INNER // 2, S(39), window=txt_dicio,
+                             width=INNER - S(26), height=S(60))
         txt_dicio.insert("1.0", self.cfg.get("dicionario", ""))
 
         separador()
@@ -1080,15 +1120,20 @@ class App:
         linha_hk = tk.Frame(w, bg=SET_BG)
         linha_hk.pack(fill="x", padx=PADX)
         self._novo_atalho = self.cfg.get("atalho", CONFIG_PADRAO["atalho"])
-        lbl_hk = tk.Label(linha_hk, text=self._novo_atalho, bg=FIELD_BG,
-                          fg=TINTA, font=("Consolas", 10), padx=14, pady=6)
-        lbl_hk.pack(side=tk.LEFT)
-        self._lbl_hk = lbl_hk
+        cx_hk = self._caixa_redonda(linha_hk, INNER - S(104), S(32))
+        cx_hk.pack(side=tk.LEFT)
+        self._hk_cv = cx_hk
+        self._hk_item = cx_hk.create_text(S(14), S(16),
+                                          text=self._novo_atalho,
+                                          fill=TINTA, anchor="w",
+                                          font=("Consolas", 10))
         def _capturar():
             if self._capturando:
                 return
             self._capturando = True
-            lbl_hk.config(text="Pressione a nova combinação…", fg=TINTA_3)
+            cx_hk.itemconfig(self._hk_item,
+                             text="Pressione a nova combinação…",
+                             fill=TINTA_3)
             self._remover_atalho()   # não disparar gravação durante a captura
             def _th():
                 try:
@@ -1098,7 +1143,7 @@ class App:
                 self._queue.put(("captura", combo))
             threading.Thread(target=_th, daemon=True).start()
         self._botao(linha_hk, "Alterar…", _capturar).pack(
-            side=tk.LEFT, padx=(10, 0))
+            side=tk.LEFT, padx=(S(10), 0))
 
         separador()
 
@@ -1142,7 +1187,8 @@ class App:
             w.destroy()
         rodape = tk.Frame(w, bg=SET_BG)
         rodape.pack(fill="x", padx=PADX, pady=(24, 10))
-        self._botao(rodape, "Salvar", _salvar, primario=True).pack(fill="x")
+        self._botao(rodape, "Salvar", _salvar, primario=True,
+                    w_min=INNER).pack()
         tk.Label(w, text=f"SOIA Flow {VERSAO}", bg=SET_BG,
                  fg="#a6acb5", font=(self._fam, 8)).pack(pady=(0, 10))
 
@@ -1153,20 +1199,23 @@ class App:
             w.destroy()
         w.protocol("WM_DELETE_WINDOW", _fechar)
 
-        # Tamanho ajustado ao conteúdo (nunca corta o botão Salvar) e centraliza
+        # Altura ajustada ao conteúdo (nunca corta o Salvar) e centraliza
         w.update_idletasks()
-        largura = max(self.S(430), w.winfo_reqwidth())
-        altura  = w.winfo_reqheight()
-        sw, sh  = w.winfo_screenwidth(), w.winfo_screenheight()
-        w.geometry(f"{largura}x{altura}+{(sw-largura)//2}+{(sh-altura)//2}")
+        altura = w.winfo_reqheight()
+        sw, sh = w.winfo_screenwidth(), w.winfo_screenheight()
+        w.geometry(f"{LARG}x{altura}+{(sw-LARG)//2}+{(sh-altura)//2}")
         w.deiconify()
 
     def _fim_captura(self, combo):
         self._capturando = False
         if combo:
             self._novo_atalho = combo
-        if self._lbl_hk is not None and self._lbl_hk.winfo_exists():
-            self._lbl_hk.config(text=self._novo_atalho, fg=TINTA)
+        try:
+            if self._hk_cv is not None and self._hk_cv.winfo_exists():
+                self._hk_cv.itemconfig(self._hk_item,
+                                       text=self._novo_atalho, fill=TINTA)
+        except Exception:
+            pass
         # Reativa o atalho vigente (o novo só vale após Salvar)
         self._registrar_atalho()
 
