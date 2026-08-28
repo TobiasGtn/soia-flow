@@ -45,7 +45,7 @@ if not any(isinstance(h, logging.FileHandler) for h in _root_log.handlers):
 _root_log.setLevel(logging.INFO)
 log = logging.getLogger("app")
 
-log.info("=== SOIA Flow v2.3 — iniciando ===")
+log.info("=== SOIA Flow v2.4 — iniciando ===")
 
 # ── Imports ────────────────────────────────────────────────────────────────────
 import ctypes
@@ -93,6 +93,7 @@ KEYRING_SVC = "TranscritorDesktop"
 
 CONFIG_PADRAO = {
     "atalho":       "ctrl+shift+space",
+    "atalho2":      "ctrl+alt+space",   # ditado longo: aperta e trava
     "modelo":       "whisper-large-v3-turbo",
     "idioma":       "pt",
     "fechar_apos":  True,    # True = só copia e recolhe; False = caixa editável
@@ -121,7 +122,7 @@ def _save_config(cfg: dict):
 TAXA        = 16000            # Hz — o que o Whisper espera
 GROQ_URL    = "https://api.groq.com/openai/v1"
 MAX_SEG     = 900              # auto-para após 15 min de gravação
-VERSAO      = "v 2.3"
+VERSAO      = "v 2.4"
 
 # Design — balões pretos com borda cinza sutil (estilo Wispr).
 # TRANSPARENT é a cor-chave da janela: os balões são renderizados em PIL com
@@ -268,10 +269,16 @@ class App:
         self._hk_esc   = None
         self._win_cfg  = None
         self._capturando = False
+        self._capturando_alvo = "1"
         self._hk_cv    = None
         self._hk_item  = None
+        self._hk_cv2   = None
+        self._hk_item2 = None
+        self._hk_main2 = None
+        self._hk_space = None
         self._lbl_teste = None
-        self._novo_atalho = self.cfg.get("atalho", CONFIG_PADRAO["atalho"])
+        self._novo_atalho  = self.cfg.get("atalho", CONFIG_PADRAO["atalho"])
+        self._novo_atalho2 = self.cfg.get("atalho2", CONFIG_PADRAO["atalho2"])
         self._inicio_por_tecla = False
 
         self.root = tk.Tk()
@@ -351,19 +358,31 @@ class App:
                     # Sem fala captada: recolhe em silêncio, sem aviso
                     self._state("pill")
                 elif kind == "tecla":
-                    # Pressionou o atalho global
+                    # Pressionou o atalho segurar-e-falar
                     if self.gravando:
                         # Repetição de tecla enquanto segura: ignora.
-                        # Se a gravação começou por clique, o atalho encerra.
+                        # Se a gravação está travada, o atalho encerra.
                         if not self._inicio_por_tecla:
                             self._confirm()
                     elif self._estado != "processing":
                         self._start(por_tecla=True)
+                elif kind == "tecla2":
+                    # Atalho de ditado longo: trava; segundo toque encerra
+                    if self.gravando:
+                        self._confirm()
+                    elif self._estado != "processing":
+                        self._start(por_tecla=False)
+                elif kind == "esc":
+                    if self.gravando:
+                        if self._inicio_por_tecla:
+                            self._discard()      # modo segurar: cancela
+                        else:
+                            self._confirm()      # modo travado: encerra
+                elif kind == "espaco":
+                    if self.gravando and not self._inicio_por_tecla:
+                        self._confirm()          # modo travado: encerra
                 elif kind == "toggle":
                     self._toggle()
-                elif kind == "descartar":
-                    if self.gravando:
-                        self._discard()
                 elif kind == "config":
                     self._abrir_config()
                 elif kind == "captura":
@@ -416,18 +435,31 @@ class App:
         try:
             self._hk_main = keyboard.add_hotkey(
                 combo, lambda: self._queue.put(("tecla",)))
-            log.info("Atalho global: %s", combo)
+            log.info("Atalho segurar-e-falar: %s", combo)
         except Exception as e:
             log.error("Atalho '%s' inválido (%s) — voltando ao padrão", combo, e)
             self.cfg["atalho"] = CONFIG_PADRAO["atalho"]
             self._hk_main = keyboard.add_hotkey(
                 self.cfg["atalho"], lambda: self._queue.put(("tecla",)))
+        # Segundo atalho: ditado longo (aperta e trava)
+        combo2 = self.cfg.get("atalho2") or CONFIG_PADRAO["atalho2"]
+        if combo2 == self.cfg.get("atalho"):
+            log.warning("Atalho de ditado longo igual ao principal — ignorado")
+            return
+        try:
+            self._hk_main2 = keyboard.add_hotkey(
+                combo2, lambda: self._queue.put(("tecla2",)))
+            log.info("Atalho ditado longo: %s", combo2)
+        except Exception as e:
+            log.error("Atalho2 '%s' inválido (%s)", combo2, e)
 
     def _remover_atalho(self):
-        if self._hk_main is not None:
-            try: keyboard.remove_hotkey(self._hk_main)
-            except Exception: pass
-            self._hk_main = None
+        for attr in ("_hk_main", "_hk_main2"):
+            h = getattr(self, attr)
+            if h is not None:
+                try: keyboard.remove_hotkey(h)
+                except Exception: pass
+                setattr(self, attr, None)
 
     def _combo_pressionado(self) -> bool:
         """True se todas as teclas do atalho ainda estão pressionadas."""
@@ -811,20 +843,29 @@ class App:
         self._inicio_por_tecla = por_tecla
         self._t0 = time.time()
         tocar(SOM_INICIO)
-        # Esc descarta enquanto grava
+        # Esc: no modo segurar cancela; no travado encerra e transcreve
         try:
             self._hk_esc = keyboard.add_hotkey(
-                "esc", lambda: self._queue.put(("descartar",)))
+                "esc", lambda: self._queue.put(("esc",)))
         except Exception:
             self._hk_esc = None
+        # No modo travado, Espaço também encerra
+        if not por_tecla:
+            try:
+                self._hk_space = keyboard.add_hotkey(
+                    "space", lambda: self._queue.put(("espaco",)))
+            except Exception:
+                self._hk_space = None
         self._state("recording")
 
     def _stop_stream(self):
         self.gravando = False
-        if self._hk_esc is not None:
-            try: keyboard.remove_hotkey(self._hk_esc)
-            except Exception: pass
-            self._hk_esc = None
+        for attr in ("_hk_esc", "_hk_space"):
+            h = getattr(self, attr)
+            if h is not None:
+                try: keyboard.remove_hotkey(h)
+                except Exception: pass
+                setattr(self, attr, None)
         if self.stream:
             try:
                 self.stream.stop()
@@ -1203,27 +1244,17 @@ class App:
                              width=INNER - S(26), height=S(132))
         txt_dicio.insert("1.0", self.cfg.get("dicionario", ""))
 
-        # ═══ Aba Configurações: atalho e comportamento ═══
-        secao(f_cfg, "Atalho global", topo=4)
-        lbl(f_cfg, "Segure para falar, solte para transcrever.",
-            fg=TINTA_3, font=(self._fam, 8)).pack(pady=(0, 6), anchor="w")
-        linha_hk = tk.Frame(f_cfg, bg=SET_BG)
-        linha_hk.pack(fill="x")
-        self._novo_atalho = self.cfg.get("atalho", CONFIG_PADRAO["atalho"])
-        cx_hk = self._caixa_redonda(linha_hk, INNER - S(104), S(32))
-        cx_hk.pack(side=tk.LEFT)
-        self._hk_cv = cx_hk
-        self._hk_item = cx_hk.create_text(S(14), S(16),
-                                          text=self._novo_atalho,
-                                          fill=TINTA, anchor="w",
-                                          font=("Consolas", 10))
-        def _capturar():
+        # ═══ Aba Configurações: atalhos e comportamento ═══
+        self._novo_atalho  = self.cfg.get("atalho", CONFIG_PADRAO["atalho"])
+        self._novo_atalho2 = self.cfg.get("atalho2", CONFIG_PADRAO["atalho2"])
+
+        def _capturar(alvo, cx, item):
             if self._capturando:
                 return
             self._capturando = True
-            cx_hk.itemconfig(self._hk_item,
-                             text="Pressione a nova combinação…",
-                             fill=TINTA_3)
+            self._capturando_alvo = alvo
+            cx.itemconfig(item, text="Pressione a nova combinação…",
+                          fill=TINTA_3)
             self._remover_atalho()   # não disparar gravação durante a captura
             def _th():
                 try:
@@ -1232,7 +1263,40 @@ class App:
                     combo = None
                 self._queue.put(("captura", combo))
             threading.Thread(target=_th, daemon=True).start()
-        self._botao(linha_hk, "Alterar…", _capturar).pack(
+
+        secao(f_cfg, "Atalho segurar-e-falar", topo=4)
+        lbl(f_cfg, "Segure para falar, solte para transcrever. "
+                   "Esc cancela.",
+            fg=TINTA_3, font=(self._fam, 8)).pack(pady=(0, 6), anchor="w")
+        linha_hk = tk.Frame(f_cfg, bg=SET_BG)
+        linha_hk.pack(fill="x")
+        cx_hk = self._caixa_redonda(linha_hk, INNER - S(104), S(32))
+        cx_hk.pack(side=tk.LEFT)
+        self._hk_cv = cx_hk
+        self._hk_item = cx_hk.create_text(S(14), S(16),
+                                          text=self._novo_atalho,
+                                          fill=TINTA, anchor="w",
+                                          font=("Consolas", 10))
+        self._botao(linha_hk, "Alterar…",
+                    lambda: _capturar("1", self._hk_cv, self._hk_item)).pack(
+            side=tk.LEFT, padx=(S(10), 0))
+
+        secao(f_cfg, "Atalho de ditado longo", topo=12)
+        lbl(f_cfg, "Aperta uma vez e trava a gravação. Para encerrar: o "
+                   "mesmo atalho,\no ✕ do balão, Esc ou Espaço.",
+            fg=TINTA_3, font=(self._fam, 8), justify="left").pack(
+            pady=(0, 6), anchor="w")
+        linha_hk2 = tk.Frame(f_cfg, bg=SET_BG)
+        linha_hk2.pack(fill="x")
+        cx_hk2 = self._caixa_redonda(linha_hk2, INNER - S(104), S(32))
+        cx_hk2.pack(side=tk.LEFT)
+        self._hk_cv2 = cx_hk2
+        self._hk_item2 = cx_hk2.create_text(S(14), S(16),
+                                            text=self._novo_atalho2,
+                                            fill=TINTA, anchor="w",
+                                            font=("Consolas", 10))
+        self._botao(linha_hk2, "Alterar…",
+                    lambda: _capturar("2", self._hk_cv2, self._hk_item2)).pack(
             side=tk.LEFT, padx=(S(10), 0))
 
         secao(f_cfg, "Comportamento")
@@ -1270,6 +1334,7 @@ class App:
             self.cfg["idioma"] = dict((r, c) for r, c in IDIOMAS).get(
                 var_idioma.get(), "pt")
             self.cfg["atalho"] = self._novo_atalho
+            self.cfg["atalho2"] = self._novo_atalho2
             self.cfg["fechar_apos"] = var_fechar.get()
             self.cfg["autostart"] = var_auto.get()
             self.cfg["autopaste"] = var_paste.get()
@@ -1304,15 +1369,21 @@ class App:
 
     def _fim_captura(self, combo):
         self._capturando = False
+        alvo2 = (self._capturando_alvo == "2")
         if combo:
-            self._novo_atalho = combo
+            if alvo2:
+                self._novo_atalho2 = combo
+            else:
+                self._novo_atalho = combo
         try:
-            if self._hk_cv is not None and self._hk_cv.winfo_exists():
-                self._hk_cv.itemconfig(self._hk_item,
-                                       text=self._novo_atalho, fill=TINTA)
+            cv = self._hk_cv2 if alvo2 else self._hk_cv
+            item = self._hk_item2 if alvo2 else self._hk_item
+            texto = self._novo_atalho2 if alvo2 else self._novo_atalho
+            if cv is not None and cv.winfo_exists():
+                cv.itemconfig(item, text=texto, fill=TINTA)
         except Exception:
             pass
-        # Reativa o atalho vigente (o novo só vale após Salvar)
+        # Reativa os atalhos vigentes (os novos só valem após Salvar)
         self._registrar_atalho()
 
     def _mostrar_teste(self, msg, cor, token_ok):
